@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClusterSight - AI Node Dashboard</title>
+    <style>
+      :root {
+        --bg-color: #0f111a;
+        --card-bg: #1e2130;
+        --text-main: #ffffff;
+        --text-muted: #8b92a5;
+        --accent-green: #00ff88;
+        --accent-red: #ff3366;
+        --accent-blue: #00b8ff;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-main);
+        margin: 0;
+        padding: 30px;
+      }
+      .header {
+        text-align: left;
+        margin-bottom: 30px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding-bottom: 15px;
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 2rem;
+        color: var(--accent-blue);
+      }
+      .header p {
+        margin: 5px 0 0 0;
+        color: var(--text-muted);
+      }
+
+      .layout {
+        display: flex;
+        gap: 25px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      /* Left Side: The Cluster Nodes */
+      .main-content {
+        flex: 3;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 20px;
+      }
+
+      /* Right Side: The Log Monitor */
+      .sidebar {
+        flex: 1;
+        background-color: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        border-top: 4px solid var(--accent-blue);
+        height: calc(100vh - 150px);
+        overflow-y: auto;
+        scroll-behavior: smooth;
+        box-shadow: -4px 0 15px rgba(0, 0, 0, 0.2);
+      }
+      .sidebar h2 {
+        margin-top: 0;
+        font-size: 1.2rem;
+        color: var(--accent-blue);
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .node-card {
+        background-color: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        border-top: 4px solid var(--accent-green);
+      }
+      .node-card.warning {
+        border-top-color: var(--accent-red);
+      }
+      .node-title {
+        font-size: 1.2rem;
+        font-weight: bold;
+        margin-bottom: 15px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .metric {
+        margin-bottom: 10px;
+        font-size: 0.9rem;
+      }
+      .metric span {
+        font-weight: bold;
+      }
+      .task-list {
+        background: rgba(0, 0, 0, 0.2);
+        padding: 10px;
+        border-radius: 6px;
+        font-family: monospace;
+        color: var(--accent-blue);
+        min-height: 40px;
+        word-wrap: break-word;
+      }
+
+      .log-entry {
+        background: rgba(0, 0, 0, 0.2);
+        padding: 12px;
+        margin-bottom: 10px;
+        border-radius: 6px;
+        border-left: 3px solid var(--text-muted);
+        font-size: 0.85rem;
+        animation: slideIn 0.3s ease-out;
+      }
+      .log-entry.heavy {
+        border-left-color: var(--accent-red);
+      }
+      .log-entry.light {
+        border-left-color: var(--accent-green);
+      }
+      .log-time {
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        margin-bottom: 4px;
+      }
+      .log-reason {
+        color: var(--accent-blue);
+        font-size: 0.8rem;
+        margin-top: 6px;
+        font-style: italic;
+        border-left: 2px solid rgba(0, 184, 255, 0.3);
+        padding-left: 8px;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateX(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>ClusterSight AI</h1>
+      <p>Real-Time Smart Workload Scheduler</p>
+    </div>
+
+    <div class="layout">
+      <div class="main-content">
+        <div class="grid" id="dashboard"></div>
+      </div>
+
+      <div class="sidebar">
+        <h2>📡 Live Task Log <span id="pulse">🟢</span></h2>
+        <div id="log-container"></div>
+      </div>
+    </div>
+
+    <script>
+      async function fetchClusterData() {
+        try {
+          const response = await fetch("data.json?t=" + new Date().getTime());
+          const data = await response.json();
+
+          // 1. UPDATE THE NODES
+          const dashboard = document.getElementById("dashboard");
+          dashboard.innerHTML = "";
+
+          data.nodes.forEach((node) => {
+            const usagePercent = (
+              (node.current_cpu / node.max_cpu) *
+              100
+            ).toFixed(1);
+            const temp = node.temp.toFixed(1);
+            const warningClass = temp > 60 ? "warning" : "";
+            const tempColor =
+              temp > 60 ? "var(--accent-red)" : "var(--accent-green)";
+
+            const card = `
+                        <div class="node-card ${warningClass}">
+                            <div class="node-title">
+                                ${node.node_id}
+                                <span style="color: ${tempColor}">🌡️ ${temp}°C</span>
+                            </div>
+                            <div class="metric">
+                                CPU Usage: <span>${node.current_cpu.toFixed(1)} / ${node.max_cpu} (${usagePercent}%)</span>
+                            </div>
+                            <div class="metric">Assigned Tasks:</div>
+                            <div class="task-list">
+                                ${node.tasks.length > 0 ? node.tasks.join(", ") : "Idle"}
+                            </div>
+                        </div>
+                    `;
+            dashboard.innerHTML += card;
+          });
+
+          // 2. UPDATE THE LOG MONITOR (Current Tasks Only)
+          const logContainer = document.getElementById("log-container");
+
+          if (data.latest_logs && data.latest_logs.length > 0) {
+            const timeNow = new Date().toLocaleTimeString();
+
+            let newLogs = "";
+            data.latest_logs.forEach((log) => {
+              const statusColor =
+                log.status === "Assigned"
+                  ? "var(--accent-green)"
+                  : "var(--accent-red)";
+              const borderClass = log.status === "Assigned" ? "light" : "heavy";
+
+              newLogs += `
+                            <div class="log-entry ${borderClass}">
+                                <div class="log-time">[${timeNow}]</div>
+                                <div><strong>${log.task_id}</strong> (${log.req_cpu} Cores) ➔ <span style="color: ${statusColor}; font-weight: bold;">${log.node}</span></div>
+                                <div class="log-reason">↳ Why: ${log.reason}</div>
+                            </div>
+                        `;
+            });
+
+            // OVERWRITE the logs instead of adding to a history list
+            logContainer.innerHTML = newLogs;
+          }
+
+          const pulse = document.getElementById("pulse");
+          pulse.style.opacity = pulse.style.opacity === "1" ? "0.2" : "1";
+        } catch (error) {
+          console.log("Waiting for data...");
+        }
+      }
+
+      // Fetch new data every 3 seconds
+      setInterval(fetchClusterData, 3000);
+      fetchClusterData();
+    </script>
+  </body>
+</html>
