@@ -9,8 +9,6 @@ interface SimulationCanvasProps {
 export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const particlesRef = useRef<any[]>([]);
-
-  // WebSocket-এর ঘনঘন রি-রেন্ডার থেকে অ্যানিমেশন লুপকে মুক্ত রাখতে useRef ব্যবহার করা হচ্ছে
   const telemetryRef = useRef<TelemetryData | null>(null);
 
   useEffect(() => {
@@ -32,43 +30,40 @@ export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
     resize();
     window.addEventListener("resize", resize);
 
-    // পার্টিকেল জেনারেটর (লাল ও নীল গ্লোয়িং ট্রাফিক কণা তৈরি করে)
     const spawnParticle = () => {
       const currentTelemetry = telemetryRef.current;
       const isSurge = currentTelemetry?.surge_active || false;
       const isAi = currentTelemetry?.ai_enabled ?? true;
       const nodes = currentTelemetry?.nodes || [];
 
-      // লাল (Heavy Task) নাকি নীল (Light Task) হবে তা নির্ধারণ
       const isHeavy = Math.random() < (isSurge ? 0.4 : 0.25);
       const W = canvas.width;
       const H = canvas.height;
 
-      const srcX = 380;
-      const srcY = H * 0.45;
-      const orchX = W / 2;
-      const orchY = H * 0.45;
-      const nodeX = W - 350;
-
-      // ৩টি নোডের ওয়াই-অক্ষ (Y-axis) পজিশন
+      const srcX = 380,
+        srcY = H * 0.45,
+        orchX = W / 2,
+        orchY = H * 0.45,
+        nodeX = W - 350;
       const nodeYs = [orchY - 140, orchY, orchY + 140];
 
-      // রাউটিং লজিক: AI অন থাকলে হেলদি নোডে যাবে, না থাকলে র‍্যান্ডম
       let destIdx = 0;
       if (isAi) {
-        if (isHeavy) {
-          destIdx =
-            nodes[0]?.status === "healthy" && (nodes[0]?.load || 0) < 85
-              ? 0
-              : 2;
-        } else {
-          destIdx =
-            nodes[1]?.status === "healthy" && (nodes[1]?.load || 0) < 85
-              ? 1
-              : 2;
-        }
+        destIdx = isHeavy
+          ? nodes[0]?.status === "healthy" && (nodes[0]?.load || 0) < 85
+            ? 0
+            : 2
+          : nodes[1]?.status === "healthy" && (nodes[1]?.load || 0) < 85
+            ? 1
+            : 2;
       } else {
         destIdx = Math.floor(Math.random() * 3);
+      }
+
+      // যদি টার্গেট নোড ক্র্যাশ করে থাকে, তবে অন্য যেকোনো হেলদি নোডে পাঠাবে
+      if (nodes[destIdx]?.status === "crashed") {
+        const healthyIdx = nodes.findIndex((n) => n.status !== "crashed");
+        if (healthyIdx !== -1) destIdx = healthyIdx;
       }
 
       particlesRef.current.push({
@@ -86,20 +81,22 @@ export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
       });
     };
 
-    // প্রতি ৮০ মিলিসেকেন্ড পর পর নতুন ট্রাফিক কণা তৈরি হবে
     const interval = setInterval(() => {
       const currentTelemetry = telemetryRef.current;
+
+      // সব নোড ক্র্যাশ করলে (Cluster Outage) ট্রাফিক কণা তৈরি হওয়া সম্পূর্ণ বন্ধ থাকবে!
+      if (currentTelemetry?.cluster_outage) return;
+
       const spawnChance = currentTelemetry?.surge_active ? 0.85 : 0.35;
       if (Math.random() < spawnChance) {
         spawnParticle();
       }
     }, 80);
 
-    // ৬০ এফপিএস (60fps) রেন্ডার লুপ
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const W = canvas.width;
-      const H = canvas.height;
+      const W = canvas.width,
+        H = canvas.height;
       const srcX = 380,
         srcY = H * 0.45,
         orchX = W / 2,
@@ -107,7 +104,6 @@ export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
         nodeX = W - 350;
       const nodeYs = [orchY - 140, orchY, orchY + 140];
 
-      // সংযোগ রেখাগুলো আঁকা হচ্ছে
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(51, 65, 85, 0.4)";
       ctx.beginPath();
@@ -122,7 +118,6 @@ export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
         ctx.stroke();
       });
 
-      // প্রতিটি কণার মুভমেন্ট এবং গ্লো ইফেক্ট
       for (let i = particlesRef.current.length - 1; i >= 0; i--) {
         const p = particlesRef.current[i];
         p.progress += p.speed;
@@ -145,7 +140,6 @@ export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
           }
         }
 
-        // কণা আঁকা এবং উজ্জ্বল গ্লো (Glow) ইফেক্ট দেওয়া হচ্ছে
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fillStyle = p.color;
@@ -164,7 +158,7 @@ export default function SimulationCanvas({ telemetry }: SimulationCanvasProps) {
       cancelAnimationFrame(animationFrameId);
       clearInterval(interval);
     };
-  }, []); // খালি অ্যারে দেওয়া হয়েছে যেন রি-রেন্ডারে অ্যানিমেশন বন্ধ না হয়!
+  }, []);
 
   return (
     <canvas
