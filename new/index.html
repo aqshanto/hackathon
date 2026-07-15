@@ -1,1 +1,981 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FinCluster AI - MFS Orchestration Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap");
 
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #0b1120;
+        color: #e2e8f0;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(51, 65, 85, 0.5);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      }
+
+      #sim-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+      }
+
+      .overlay-container {
+        position: relative;
+        z-index: 10;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        pointer-events: none;
+      }
+
+      header,
+      footer,
+      .interactive-panel {
+        pointer-events: auto;
+      }
+
+      .metric-value {
+        font-family: "Courier New", Courier, monospace;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+      }
+
+      .node-card {
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid #334155;
+        border-radius: 8px;
+        padding: 12px;
+        width: 300px;
+        transition: all 0.3s ease;
+      }
+
+      .status-badge {
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .bg-healthy {
+        background: rgba(16, 185, 129, 0.2);
+        color: #34d399;
+        border: 1px solid #059669;
+      }
+      .bg-warning {
+        background: rgba(245, 158, 11, 0.2);
+        color: #fbbf24;
+        border: 1px solid #d97706;
+      }
+      .bg-crashed {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid #dc2626;
+        animation: pulse-red 1s infinite;
+      }
+      .bg-standby {
+        background: rgba(100, 116, 139, 0.2);
+        color: #94a3b8;
+        border: 1px solid #475569;
+      }
+
+      @keyframes pulse-red {
+        0% {
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+        }
+        70% {
+          box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+        }
+      }
+
+      .progress-track {
+        background: #1e293b;
+        height: 6px;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-top: 4px;
+      }
+      .progress-fill {
+        height: 100%;
+        transition:
+          width 0.2s ease,
+          background-color 0.2s ease;
+      }
+
+      .ai-core {
+        position: absolute;
+        left: 50%;
+        top: 45%;
+        transform: translate(-50%, -50%);
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: #0f172a;
+        border: 2px solid #3b82f6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        z-index: 5;
+        transition: all 0.3s ease;
+      }
+
+      .ai-core.legacy-mode {
+        border-color: #64748b;
+        box-shadow: 0 0 10px rgba(100, 116, 139, 0.4);
+      }
+
+      .ai-core i {
+        font-size: 2rem;
+        color: #3b82f6;
+        transition: color 0.3s;
+      }
+      .ai-core.legacy-mode i {
+        color: #64748b;
+      }
+
+      .ai-label-box {
+        position: absolute;
+        top: calc(45% + 50px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid #334155;
+        padding: 8px 16px;
+        border-radius: 8px;
+        text-align: center;
+        z-index: 5;
+      }
+
+      .btn-action {
+        transition: all 0.2s;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      .btn-action:active {
+        transform: scale(0.95);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="sim-canvas"></canvas>
+
+    <div class="overlay-container">
+      <!-- Header Metrics -->
+      <header
+        class="glass-panel px-6 py-4 flex justify-between items-center z-20"
+      >
+        <div class="flex items-center gap-3">
+          <i class="fa-solid fa-network-wired text-3xl text-blue-500"></i>
+          <div>
+            <h1 class="text-xl font-bold text-white tracking-wide">
+              FinCluster AI
+            </h1>
+            <p class="text-xs text-slate-400">
+              Phase 1 MVP | Team DIU_Gurte_Aisi
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-10 items-center">
+          <div class="text-center">
+            <p class="text-xs text-slate-400 uppercase tracking-wider">
+              System Uptime
+            </p>
+            <p
+              class="text-2xl font-bold text-emerald-400 metric-value"
+              id="metric-uptime"
+            >
+              100.00%
+            </p>
+          </div>
+          <div class="w-px h-8 bg-slate-700"></div>
+          <div class="text-center">
+            <p class="text-xs text-slate-400 uppercase tracking-wider">
+              Avg Latency
+            </p>
+            <p
+              class="text-2xl font-bold text-amber-400 metric-value"
+              id="metric-latency"
+            >
+              5 ms
+            </p>
+          </div>
+          <div class="w-px h-8 bg-slate-700"></div>
+          <div class="text-center">
+            <p class="text-xs text-slate-400 uppercase tracking-wider">
+              Active Nodes
+            </p>
+            <p
+              class="text-2xl font-bold text-blue-400 metric-value"
+              id="metric-nodes"
+            >
+              3/3
+            </p>
+          </div>
+          <div class="w-px h-8 bg-slate-700"></div>
+          <div class="text-center">
+            <p class="text-xs text-slate-400 uppercase tracking-wider">
+              Sim Time
+            </p>
+            <p
+              class="text-2xl font-bold text-white metric-value"
+              id="metric-time"
+            >
+              00:00:00
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <main
+        class="flex-1 relative flex items-center w-full max-w-[1400px] mx-auto px-8"
+      >
+        <!-- Left: Traffic Source & Analytics Chart -->
+        <div class="interactive-panel w-[350px] flex flex-col gap-6">
+          <!-- Traffic Box -->
+          <div class="glass-panel p-5 rounded-xl border-l-4 border-l-blue-500">
+            <h3 class="text-white font-semibold mb-1">
+              <i class="fa-solid fa-mobile-screen text-slate-400 mr-2"></i>MFS
+              App Users
+            </h3>
+            <p
+              class="text-xs text-slate-400 mb-4 pb-3 border-b border-slate-700"
+            >
+              Live transaction simulator
+            </p>
+
+            <div class="space-y-4">
+              <div class="flex justify-between items-center">
+                <div class="flex items-center">
+                  <span
+                    class="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] mr-3"
+                  ></span>
+                  <div>
+                    <p class="text-sm text-slate-200 leading-tight">
+                      Heavy Tasks
+                    </p>
+                    <p class="text-[10px] text-slate-500">
+                      Fraud Check / 50k Cashout
+                    </p>
+                  </div>
+                </div>
+                <span
+                  class="text-red-400 font-mono text-sm font-bold"
+                  id="count-heavy"
+                  >0</span
+                >
+              </div>
+              <div class="flex justify-between items-center">
+                <div class="flex items-center">
+                  <span
+                    class="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_8px_#3b82f6] mr-3"
+                  ></span>
+                  <div>
+                    <p class="text-sm text-slate-200 leading-tight">
+                      Light Tasks
+                    </p>
+                    <p class="text-[10px] text-slate-500">
+                      Balance / Small Send
+                    </p>
+                  </div>
+                </div>
+                <span
+                  class="text-blue-400 font-mono text-sm font-bold"
+                  id="count-light"
+                  >0</span
+                >
+              </div>
+            </div>
+          </div>
+
+          <!-- NEW: Detailed Analytics Chart Box -->
+          <div
+            class="glass-panel p-5 rounded-xl border-l-4 border-l-emerald-500"
+          >
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <h3 class="text-white font-semibold text-sm">
+                  <i class="fa-solid fa-chart-line text-emerald-400 mr-2"></i
+                  >Cost Analytics
+                </h3>
+                <p class="text-[10px] text-slate-400">
+                  Legacy vs AI Optimized ($)
+                </p>
+              </div>
+              <div class="text-right">
+                <p
+                  class="text-[10px] text-emerald-400 uppercase font-bold tracking-wider"
+                >
+                  Total Saved
+                </p>
+                <p
+                  class="text-xl font-bold text-emerald-400 metric-value"
+                  id="metric-saved"
+                >
+                  $0.00
+                </p>
+              </div>
+            </div>
+            <!-- Chart Canvas -->
+            <div class="w-full h-[180px] mt-2">
+              <canvas id="costChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center: AI Orchestrator UI -->
+        <div id="ai-core-el" class="ai-core">
+          <i class="fa-solid fa-microchip"></i>
+        </div>
+        <div class="ai-label-box interactive-panel">
+          <p
+            class="text-sm font-bold text-blue-400 tracking-widest"
+            id="orch-label"
+          >
+            AI SMART SCHEDULING
+          </p>
+          <p class="text-xs text-slate-400 mt-1" id="orch-sub">
+            Routing by task complexity
+          </p>
+        </div>
+
+        <!-- Right: Cluster Nodes -->
+        <div
+          class="absolute right-8 top-1/2 transform -translate-y-1/2 flex flex-col gap-6"
+          id="nodes-ui"
+        >
+          <!-- Node HTML will be injected here -->
+        </div>
+      </main>
+
+      <footer class="glass-panel p-4 flex justify-center gap-4 z-20">
+        <button
+          id="btn-ai"
+          class="btn-action bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg shadow-[0_0_15px_rgba(59,130,246,0.4)]"
+        >
+          <i class="fa-solid fa-brain mr-2"></i>FinCluster AI:
+          <span id="lbl-ai">ON</span>
+        </button>
+        <button
+          id="btn-surge"
+          class="btn-action bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg border border-slate-600"
+        >
+          <i class="fa-solid fa-bolt mr-2"></i>Trigger Festival Surge
+        </button>
+        <button
+          id="btn-anomaly"
+          class="btn-action bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg border border-slate-600"
+        >
+          <i class="fa-solid fa-fire mr-2"></i>Trigger Node 1 Anomaly
+        </button>
+      </footer>
+    </div>
+
+    <script>
+      // State
+      const state = {
+        aiEnabled: true,
+        surgeActive: false,
+        anomalyActive: false,
+        uptime: 100.0,
+        latency: 5,
+        totalTasks: { heavy: 0, light: 0 },
+        failedTasks: 0,
+        costData: { legacy: 0, optimized: 0, saved: 0 },
+        particles: [],
+        simSeconds: 0,
+        chartTimer: 0,
+        lastTime: performance.now(),
+      };
+
+      // Node Configuration (Added 'processed' counter)
+      const nodes = [
+        {
+          id: 0,
+          name: "Node 1 (Heavy GPU)",
+          type: "heavy",
+          load: 0,
+          temp: 35,
+          assigned: 0,
+          status: "healthy",
+          costActive: 2.5,
+          costStandby: 0.0,
+        },
+        {
+          id: 1,
+          name: "Node 2 (Light CPU)",
+          type: "light",
+          load: 0,
+          temp: 30,
+          assigned: 0,
+          status: "healthy",
+          costActive: 0.4,
+          costStandby: 0.0,
+        },
+        {
+          id: 2,
+          name: "Node 3 (Scaler)",
+          type: "dynamic",
+          load: 0,
+          temp: 25,
+          assigned: 0,
+          status: "standby",
+          costActive: 1.2,
+          costStandby: 0.0,
+        },
+      ];
+
+      // Canvas Setup
+      const canvas = document.getElementById("sim-canvas");
+      const ctx = canvas.getContext("2d");
+      let W, H;
+      let coords = {
+        srcX: 0,
+        srcY: 0,
+        orchX: 0,
+        orchY: 0,
+        nodeX: 0,
+        nodeYs: [],
+      };
+
+      function resize() {
+        W = canvas.width = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+
+        coords.srcX = 400; // Adjusted for wider left panel
+        coords.srcY = H / 2 - 50;
+        coords.orchX = W / 2;
+        coords.orchY = H / 2 - 50;
+        coords.nodeX = W - 350;
+
+        const nodeSpacing = 130;
+        coords.nodeYs = [
+          coords.orchY - nodeSpacing,
+          coords.orchY,
+          coords.orchY + nodeSpacing,
+        ];
+
+        renderNodesUI();
+      }
+      window.addEventListener("resize", resize);
+
+      function renderNodesUI() {
+        const container = document.getElementById("nodes-ui");
+        container.innerHTML = "";
+
+        nodes.forEach((n, i) => {
+          const isStandby = n.status === "standby";
+          const currentCost = isStandby ? n.costStandby : n.costActive;
+
+          const html = `
+                    <div class="node-card" id="card-n${i}">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h4 class="text-sm font-bold text-slate-200">${n.name}</h4>
+                                <p class="text-[10px] text-slate-400 mt-0.5">CPU Load: <span id="lbl-load-n${i}">0%</span></p>
+                            </div>
+                            <span id="badge-n${i}" class="status-badge bg-healthy">HEALTHY</span>
+                        </div>
+                        <div class="progress-track">
+                            <div id="bar-n${i}" class="progress-fill bg-emerald-500" style="width: 0%"></div>
+                        </div>
+                        <div class="flex justify-between items-center mt-3 text-xs font-mono border-t border-slate-700 pt-2">
+                            <span class="text-slate-400"><i class="fa-solid fa-temperature-half mr-1"></i><span id="lbl-temp-n${i}">35</span>°C</span>
+                            <span class="text-slate-300">Tasks: <span id="lbl-tasks-n${i}" class="font-bold text-white">0</span></span>
+                            <span class="text-slate-400 font-bold" id="lbl-cost-n${i}">$${currentCost.toFixed(2)}/hr</span>
+                        </div>
+                    </div>
+                `;
+          container.innerHTML += html;
+        });
+      }
+
+      // Detailed Chart Setup (Matches user request)
+      const chartCtx = document.getElementById("costChart").getContext("2d");
+      const costChart = new Chart(chartCtx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "Legacy Cost ($)",
+              data: [],
+              borderColor: "#ef4444",
+              backgroundColor: "#ef4444",
+              borderWidth: 2,
+              pointRadius: 3,
+              pointBackgroundColor: "#ef4444",
+              tension: 0.3,
+            },
+            {
+              label: "AI Cost ($)",
+              data: [],
+              borderColor: "#10b981",
+              backgroundColor: "#10b981",
+              borderWidth: 2,
+              pointRadius: 3,
+              pointBackgroundColor: "#10b981",
+              tension: 0.3,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: "top",
+              labels: {
+                color: "#cbd5e1",
+                font: { size: 10, family: "Inter" },
+                boxWidth: 12,
+              },
+            },
+          },
+          scales: {
+            x: {
+              display: true,
+              grid: { color: "rgba(51, 65, 85, 0.4)", drawBorder: false },
+              ticks: { color: "#94a3b8", font: { size: 10 }, maxTicksLimit: 6 },
+            },
+            y: {
+              display: true,
+              grid: { color: "rgba(51, 65, 85, 0.4)", drawBorder: false },
+              ticks: {
+                callback: function (value) {
+                  return "$" + value;
+                },
+                color: "#94a3b8",
+                font: { size: 10, family: "Courier New" },
+                maxTicksLimit: 5,
+              },
+              beginAtZero: true,
+            },
+          },
+          layout: { padding: { top: 0, bottom: 0, left: -5, right: 0 } },
+          animation: { duration: 400, easing: "linear" },
+        },
+      });
+
+      class TaskParticle {
+        constructor(isHeavy) {
+          this.isHeavy = isHeavy;
+          this.x = coords.srcX;
+          this.y = coords.srcY + (Math.random() * 40 - 20);
+          this.target = "orchestrator";
+          this.nodeDestIdx = -1;
+          this.progress = 0;
+
+          this.color = isHeavy ? "#ef4444" : "#3b82f6";
+          this.size = isHeavy ? 5 : 3.5;
+          this.speed = state.surgeActive
+            ? Math.random() * 0.03 + 0.04
+            : Math.random() * 0.015 + 0.015;
+
+          this.nodeDestIdx = this.route();
+          nodes[this.nodeDestIdx].assigned++;
+        }
+
+        update() {
+          this.progress += this.speed;
+
+          if (this.target === "orchestrator") {
+            this.x = lerp(this.x, coords.orchX, this.progress);
+            this.y = lerp(this.y, coords.orchY, this.progress);
+
+            if (this.progress >= 1) {
+              this.progress = 0;
+              this.target = "node";
+              this.startX = this.x;
+              this.startY = this.y;
+            }
+          } else if (this.target === "node") {
+            let destX = coords.nodeX;
+            let destY = coords.nodeYs[this.nodeDestIdx];
+
+            this.x = lerp(this.startX, destX, this.progress);
+            this.y = lerp(this.startY, destY, this.progress);
+
+            if (this.progress >= 1) {
+              this.applyLoad();
+              return true;
+            }
+          }
+          return false;
+        }
+
+        route() {
+          let destIdx = 0;
+          if (state.aiEnabled) {
+            if (this.isHeavy) {
+              if (nodes[0].status === "healthy" && nodes[0].load < 85)
+                destIdx = 0;
+              else destIdx = 2;
+            } else {
+              if (nodes[1].status === "healthy" && nodes[1].load < 85)
+                destIdx = 1;
+              else destIdx = 2;
+            }
+          } else {
+            const totalProcessed =
+              state.totalTasks.heavy + state.totalTasks.light;
+            destIdx = totalProcessed % 3;
+          }
+
+          if (nodes[destIdx].status === "standby")
+            nodes[destIdx].status = "healthy";
+          return destIdx;
+        }
+
+        applyLoad() {
+          let target = nodes[this.nodeDestIdx];
+          if (target.status === "crashed") {
+            state.failedTasks++;
+          } else {
+            let loadAmt = this.isHeavy ? 15 : 4;
+            target.load = Math.min(100, target.load + loadAmt);
+            target.processed++; // Increment individual node task counter
+          }
+        }
+
+        draw() {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fillStyle = this.color;
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = this.color;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      function lerp(start, end, amt) {
+        return (1 - amt) * start + amt * end;
+      }
+
+      function updateLogic(dt) {
+        let simSpeedMultiplier = 600; // 1 real second = 10 sim minutes
+        let simDtSeconds = (dt / 1000) * simSpeedMultiplier;
+        state.simSeconds += simDtSeconds;
+        let simDtHours = simDtSeconds / 3600;
+
+        let spawnChance = state.surgeActive ? 0.7 : 0.1;
+        if (Math.random() < spawnChance) {
+          let isHeavy = Math.random() < 0.25;
+          if (isHeavy) state.totalTasks.heavy++;
+          else state.totalTasks.light++;
+          state.particles.push(new TaskParticle(isHeavy));
+
+          document.getElementById("count-heavy").innerText =
+            state.totalTasks.heavy;
+          document.getElementById("count-light").innerText =
+            state.totalTasks.light;
+        }
+
+        let activeCount = 0;
+        let currentLatencySum = 0;
+
+        nodes.forEach((n, i) => {
+          if (n.load > 0) {
+            let decay = state.aiEnabled ? 1.2 : 0.6;
+            n.load = Math.max(0, n.load - decay);
+          }
+
+          if (i === 0 && state.anomalyActive) {
+            n.temp += 0.4;
+          } else {
+            if (n.load > 75) n.temp += 0.15;
+            else if (n.temp > 25) n.temp -= 0.2;
+          }
+
+          if (n.temp > 95) {
+            n.status = "crashed";
+            n.load = 0;
+          } else if (n.temp > 75 && n.status !== "crashed") {
+            n.status = state.aiEnabled ? "warning" : "healthy";
+          } else if (n.temp < 50 && n.status === "crashed") {
+            n.status = "healthy";
+          } else if (n.temp <= 75 && n.status === "warning") {
+            n.status = "healthy";
+          }
+
+          if (state.aiEnabled && i === 2 && n.status !== "crashed") {
+            if (
+              !state.surgeActive &&
+              n.load === 0 &&
+              nodes[0].load < 60 &&
+              nodes[1].load < 60
+            ) {
+              n.status = "standby";
+            }
+          } else if (!state.aiEnabled && i === 2 && n.status === "standby") {
+            n.status = "healthy";
+          }
+
+          if (n.status !== "standby" && n.status !== "crashed") activeCount++;
+          currentLatencySum += n.load * 0.4;
+
+          updateNodeDOM(i, n);
+        });
+
+        document.getElementById("metric-nodes").innerText = `${activeCount}/3`;
+
+        let baseLatency = 5;
+        let failPenalty =
+          state.failedTasks > 0 ? Math.min(500, state.failedTasks * 10) : 0;
+        let targetLatency =
+          baseLatency + currentLatencySum / (activeCount || 1) + failPenalty;
+        state.latency = lerp(state.latency, targetLatency, 0.1);
+
+        let totalProcessed = state.totalTasks.heavy + state.totalTasks.light;
+        let targetUptime = 100.0;
+        if (totalProcessed > 0) {
+          targetUptime = 100.0 - (state.failedTasks / totalProcessed) * 100;
+        }
+        state.uptime = lerp(state.uptime, targetUptime, 0.05);
+
+        let currentLegacyCostRate = nodes.reduce(
+          (sum, n) => sum + n.costActive,
+          0,
+        );
+        let currentOptimizedCostRate = nodes.reduce(
+          (sum, n) =>
+            sum + (n.status === "standby" ? n.costStandby : n.costActive),
+          0,
+        );
+
+        state.costData.legacy += currentLegacyCostRate * simDtHours;
+        state.costData.optimized += currentOptimizedCostRate * simDtHours;
+        state.costData.saved = state.costData.legacy - state.costData.optimized;
+
+        state.chartTimer += dt;
+        if (state.chartTimer >= 3000) {
+          // Every 3 seconds
+          state.chartTimer = 0;
+          let timeLabel = formatTimeLabel(state.simSeconds);
+
+          costChart.data.labels.push(timeLabel);
+          costChart.data.datasets[0].data.push(
+            state.costData.legacy.toFixed(2),
+          );
+          costChart.data.datasets[1].data.push(
+            state.costData.optimized.toFixed(2),
+          );
+
+          if (costChart.data.labels.length > 25) {
+            costChart.data.labels.shift();
+            costChart.data.datasets[0].data.shift();
+            costChart.data.datasets[1].data.shift();
+          }
+          costChart.update();
+        }
+
+        updateMetricsDOM();
+      }
+
+      function formatTimeDisplay(secs) {
+        let h = Math.floor(secs / 3600);
+        let m = Math.floor((secs % 3600) / 60);
+        let s = Math.floor(secs % 60);
+        return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+      }
+
+      function formatTimeLabel(secs) {
+        let h = Math.floor(secs / 3600);
+        let m = Math.floor((secs % 3600) / 60);
+        return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+      }
+
+      function updateNodeDOM(i, n) {
+        const loadVal = document.getElementById(`lbl-load-n${i}`);
+        const bar = document.getElementById(`bar-n${i}`);
+        const tempVal = document.getElementById(`lbl-temp-n${i}`);
+        const badge = document.getElementById(`badge-n${i}`);
+        const costVal = document.getElementById(`lbl-cost-n${i}`);
+        const tasksVal = document.getElementById(`lbl-tasks-n${i}`);
+
+        loadVal.innerText = `${Math.floor(n.load)}%`;
+        bar.style.width = `${n.load}%`;
+        tempVal.innerText = Math.floor(n.temp);
+        tasksVal.innerText = n.assigned; // Display matched assigned tasks
+
+        const activeCost =
+          n.status === "standby" ? n.costStandby : n.costActive;
+        costVal.innerText = `$${activeCost.toFixed(2)}/hr`;
+
+        badge.className = "status-badge";
+        bar.className = "progress-fill";
+        tempVal.className = "";
+
+        if (n.status === "crashed") {
+          badge.classList.add("bg-crashed");
+          badge.innerText = "CRASHED";
+          bar.style.width = "0%";
+          tempVal.classList.add("text-red-500", "font-bold");
+        } else if (n.status === "warning") {
+          badge.classList.add("bg-warning");
+          badge.innerText = "WARNING (Rerouting)";
+          bar.classList.add("bg-amber-500");
+          tempVal.classList.add("text-amber-500");
+        } else if (n.status === "standby") {
+          badge.classList.add("bg-standby");
+          badge.innerText = "STANDBY (Sleep)";
+          bar.classList.add("bg-slate-600");
+          costVal.innerText = `$0.00/hr (Saved)`;
+        } else {
+          badge.classList.add("bg-healthy");
+          badge.innerText = "HEALTHY";
+          if (n.load > 70) bar.classList.add("bg-amber-500");
+          else bar.classList.add("bg-emerald-500");
+        }
+      }
+
+      function updateMetricsDOM() {
+        document.getElementById("metric-uptime").innerText =
+          `${state.uptime.toFixed(2)}%`;
+        document.getElementById("metric-uptime").className =
+          `text-2xl font-bold metric-value ${state.uptime < 99 ? "text-red-500" : "text-emerald-400"}`;
+
+        document.getElementById("metric-latency").innerText =
+          `${Math.floor(state.latency)} ms`;
+        document.getElementById("metric-latency").className =
+          `text-2xl font-bold metric-value ${state.latency > 150 ? "text-red-500" : state.latency > 50 ? "text-amber-400" : "text-amber-400"}`;
+
+        document.getElementById("metric-time").innerText = formatTimeDisplay(
+          state.simSeconds,
+        );
+
+        // Update Saved Cost in Chart Panel
+        document.getElementById("metric-saved").innerText =
+          `$${state.costData.saved.toFixed(2)}`;
+      }
+
+      function drawCanvas() {
+        ctx.clearRect(0, 0, W, H);
+
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(51, 65, 85, 0.4)";
+
+        ctx.beginPath();
+        ctx.moveTo(coords.srcX, coords.srcY);
+        ctx.lineTo(coords.orchX, coords.orchY);
+        ctx.stroke();
+
+        nodes.forEach((n, i) => {
+          ctx.beginPath();
+          ctx.moveTo(coords.orchX, coords.orchY);
+          ctx.lineTo(coords.nodeX, coords.nodeYs[i]);
+          ctx.stroke();
+        });
+
+        for (let i = state.particles.length - 1; i >= 0; i--) {
+          let p = state.particles[i];
+          if (p.update()) {
+            state.particles.splice(i, 1);
+          } else {
+            p.draw();
+          }
+        }
+      }
+
+      function gameLoop(timestamp) {
+        const dt = timestamp - state.lastTime;
+        state.lastTime = timestamp;
+
+        updateLogic(dt);
+        drawCanvas();
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      document.getElementById("btn-ai").addEventListener("click", (e) => {
+        state.aiEnabled = !state.aiEnabled;
+        const btn = e.currentTarget;
+        const core = document.getElementById("ai-core-el");
+        const lblBoxTitle = document.getElementById("orch-label");
+        const lblBoxSub = document.getElementById("orch-sub");
+
+        if (state.aiEnabled) {
+          btn.className =
+            "btn-action bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg shadow-[0_0_15px_rgba(59,130,246,0.4)]";
+          document.getElementById("lbl-ai").innerText = "ON";
+          core.classList.remove("legacy-mode");
+          lblBoxTitle.innerText = "AI SMART SCHEDULING";
+          lblBoxTitle.className =
+            "text-sm font-bold text-blue-400 tracking-widest";
+          lblBoxSub.innerText = "Routing by task complexity";
+        } else {
+          btn.className =
+            "btn-action bg-slate-700 hover:bg-slate-600 text-slate-300 px-6 py-2 rounded-lg border border-slate-600";
+          document.getElementById("lbl-ai").innerText = "OFF (LEGACY)";
+          core.classList.add("legacy-mode");
+          lblBoxTitle.innerText = "BLIND ROUND-ROBIN";
+          lblBoxTitle.className =
+            "text-sm font-bold text-slate-400 tracking-widest";
+          lblBoxSub.innerText = "Ignores complexity & node health";
+        }
+      });
+
+      document.getElementById("btn-surge").addEventListener("click", (e) => {
+        state.surgeActive = !state.surgeActive;
+        const btn = e.currentTarget;
+        if (state.surgeActive) {
+          btn.className =
+            "btn-action bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.4)]";
+          btn.innerHTML =
+            '<i class="fa-solid fa-stop mr-2"></i>Stop Traffic Surge';
+        } else {
+          btn.className =
+            "btn-action bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg border border-slate-600";
+          btn.innerHTML =
+            '<i class="fa-solid fa-bolt mr-2"></i>Trigger Festival Surge';
+        }
+      });
+
+      document.getElementById("btn-anomaly").addEventListener("click", (e) => {
+        state.anomalyActive = true;
+        const btn = e.currentTarget;
+        btn.className =
+          "btn-action bg-amber-600 text-white px-6 py-2 rounded-lg cursor-not-allowed";
+        btn.innerHTML =
+          '<i class="fa-solid fa-triangle-exclamation animate-pulse mr-2"></i>Node 1 Overheating...';
+
+        setTimeout(() => {
+          state.anomalyActive = false;
+          btn.className =
+            "btn-action bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg border border-slate-600";
+          btn.innerHTML =
+            '<i class="fa-solid fa-fire mr-2"></i>Trigger Node 1 Anomaly';
+        }, 8000);
+      });
+
+      // Initialize
+      window.onload = () => {
+        resize();
+        requestAnimationFrame(gameLoop);
+      };
+    </script>
+  </body>
+</html>
