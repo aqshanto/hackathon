@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { Cpu, Smartphone } from "lucide-react";
+import { Cpu, Smartphone, AlertTriangle, RefreshCw } from "lucide-react";
 import { TelemetryData } from "@/types";
 import Header from "@/components/Header";
 import NodeCard from "@/components/NodeCard";
@@ -27,15 +27,36 @@ export default function Home() {
 
   return (
     <div className="relative h-screen w-screen flex flex-col justify-between overflow-hidden">
-      {/* Background HTML5 Canvas Animation */}
       <SimulationCanvas telemetry={telemetry} />
-
-      {/* Top Header */}
       <Header telemetry={telemetry} />
 
-      {/* Main Content Layout */}
+      {/* ⚠️ CRITICAL CLUSTER OUTAGE OVERLAY BANNER */}
+      {telemetry?.cluster_outage && (
+        <div className="absolute inset-0 bg-red-950/70 backdrop-blur-md z-50 flex flex-col items-center justify-center animate-fade-in pointer-events-auto">
+          <div className="bg-slate-900 border-2 border-red-500 p-8 rounded-2xl shadow-[0_0_60px_rgba(239,68,68,0.6)] text-center max-w-lg border-t-8 border-t-red-600 animate-pulse">
+            <div className="w-16 h-16 bg-red-600/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500 shadow-inner">
+              <AlertTriangle className="w-8 h-8 text-red-500 animate-bounce" />
+            </div>
+            <h2 className="text-2xl font-black text-red-500 tracking-wider uppercase mb-2">
+              Critical Cluster Outage!
+            </h2>
+            <p className="text-sm text-slate-300 mb-6 leading-relaxed">
+              All processing nodes have{" "}
+              <span className="text-red-400 font-bold underline">CRASHED</span>{" "}
+              due to extreme thermal overload (Over 95°C). Transaction routing
+              is automatically suspended to prevent data corruption.
+            </p>
+            <div className="bg-red-950/90 border border-red-800 p-3.5 rounded-lg text-xs font-mono text-red-200 flex items-center justify-center gap-3">
+              <RefreshCw className="w-4 h-4 animate-spin text-red-400" />
+              <span>
+                Automated Self-Healing: Waiting for nodes to cool below 50°C...
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 relative flex items-center w-full max-w-350 mx-auto px-8 z-10 pointer-events-none">
-        {/* Left Panel: Traffic Source & Cost Chart */}
         <div className="w-87.5 flex flex-col gap-6">
           <div className="glass-panel p-5 rounded-xl border-l-4 border-l-blue-500 pointer-events-auto shadow-lg">
             <h3 className="text-white font-semibold mb-1 flex items-center gap-2">
@@ -89,8 +110,18 @@ export default function Home() {
           />
         </div>
 
-        {/* Center: AI Orchestrator Core */}
         <div className="absolute left-1/2 top-[45%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center pointer-events-auto">
+          {/* Fixed line below: replaced 'not' with '!' */}
+          {telemetry?.ai_decision && !telemetry?.cluster_outage && (
+            <div className="absolute -top-16 w-137.5 bg-blue-950/90 border border-blue-500/50 p-2.5 rounded-lg shadow-2xl backdrop-blur-md flex items-center gap-3 animate-fade-in">
+              <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping shrink-0"></div>
+              <p className="text-[11px] text-blue-200 font-mono leading-relaxed truncate">
+                <span className="font-bold text-white uppercase">AI Log: </span>
+                {telemetry.ai_decision}
+              </p>
+            </div>
+          )}
+
           <div
             className={`w-20 h-20 rounded-full bg-slate-900 border-2 flex items-center justify-center transition-all duration-300 shadow-2xl ${
               telemetry?.ai_enabled
@@ -118,25 +149,10 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Live AI API Decision Box */}
-        {telemetry?.ai_decision && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 w-150 bg-blue-950/80 border border-blue-500/50 p-3 rounded-lg shadow-2xl backdrop-blur-md pointer-events-auto flex items-center gap-3 animate-fade-in">
-            <div className="w-3 h-3 rounded-full bg-blue-400 animate-ping shrink-0"></div>
-            <p className="text-xs text-blue-200 font-mono leading-relaxed">
-              <span className="font-bold text-white uppercase">
-                System Telemetry Log:{" "}
-              </span>
-              {telemetry.ai_decision}
-            </p>
-          </div>
-        )}
-
-        {/* Right Panel: Cluster Nodes */}
         <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-col gap-6">
           {telemetry?.nodes.map((node) => (
             <NodeCard key={node.id} node={node} />
           )) ||
-            // Default Loading Skeleton
             [0, 1, 2].map((i) => (
               <div
                 key={i}
@@ -146,7 +162,6 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Bottom Control Footer */}
       <ControlPanel
         aiEnabled={telemetry?.ai_enabled || true}
         surgeActive={telemetry?.surge_active || false}
