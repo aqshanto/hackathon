@@ -16,6 +16,7 @@ class MFSOrchestrator:
         self.legacy_cost = 0.0
         self.optimized_cost = 0.0
         self.latest_ai_decision = "System Normal. AI Smart Scheduling active."
+        self.cluster_outage = False  # নতুন ফ্ল্যাগ: সব নোড ক্র্যাশ করেছে কিনা
         
         self.nodes = [
             NodeStatus(id=0, name="Node 1 (Heavy GPU)", type="heavy", load=0.0, temp=35.0, assigned=0, status="healthy", costActive=2.5, costStandby=0.0),
@@ -29,26 +30,28 @@ class MFSOrchestrator:
         self.sim_seconds += sim_dt_seconds
         sim_dt_hours = sim_dt_seconds / 3600.0
 
-        # ১. আসল MFS ট্রানজেকশন ডেটা জেনারেট করা হচ্ছে
-        spawn_chance = 0.7 if self.surge_active else 0.15
-        if random.random() < spawn_chance:
-            # একটি আসল MFS ট্রানজেকশন পেলোড তৈরি হচ্ছে
-            amount = random.choice([500, 1200, 2500, 5000, 15000, 48000, 50000])
-            tx_type = random.choice([0, 1, 2]) # 0:Send, 1:Pay, 2:Cashout
-            account_age = random.randint(0, 60)
-            
-            # ২. আসল Scikit-Learn ML মডেল দিয়ে প্রেডিক্ট করা হচ্ছে এটা Heavy নাকি Light
-            ai_analysis = real_ai.predict_task_complexity(amount, tx_type, account_age)
-            is_heavy = ai_analysis["is_heavy"]
-            load_to_add = ai_analysis["cpu_load_required"]
-            
-            if is_heavy:
-                self.total_heavy += 1
-            else:
-                self.total_light += 1
-            self.route_task(is_heavy, load_to_add)
+        # ১. চেক করা হচ্ছে ক্লাস্টারে কোনো অ্যাক্টিভ নোড আছে কিনা
+        active_count = sum(1 for n in self.nodes if n.status not in ["standby", "crashed"])
+        self.cluster_outage = (active_count == 0)
 
-        active_count = 0
+        # যদি সব নোড ক্র্যাশ করে (Cluster Outage), তবে নতুন টাস্ক রাউটিং সম্পূর্ণ বন্ধ থাকবে!
+        if self.cluster_outage:
+            self.latest_ai_decision = "[CRITICAL OUTAGE]: All cluster nodes CRASHED! Halting transaction flow until automated thermal cooldown..."
+        else:
+            spawn_chance = 0.7 if self.surge_active else 0.15
+            if random.random() < spawn_chance:
+                amount = random.choice([500, 1200, 2500, 5000, 15000, 48000, 50000])
+                tx_type = random.choice([0, 1, 2])
+                account_age = random.randint(0, 60)
+                
+                ai_analysis = real_ai.predict_task_complexity(amount, tx_type, account_age)
+                is_heavy = ai_analysis["is_heavy"]
+                load_to_add = ai_analysis["cpu_load_required"]
+                
+                if is_heavy: self.total_heavy += 1
+                else: self.total_light += 1
+                self.route_task(is_heavy, load_to_add)
+
         current_latency_sum = 0.0
 
         for i, n in enumerate(self.nodes):
@@ -58,13 +61,13 @@ class MFSOrchestrator:
 
             if i == 0 and self.anomaly_active:
                 n.temp += 0.5
-                # ৩. যখনই নোড ১ ওভারহিট করবে, সাথে সাথে আসল LLM API কল করে লাইভ ডিসিশন নেবে!
-                if n.temp > 75 and random.random() < 0.1:
+                if n.temp > 75 and random.random() < 0.1 and not self.cluster_outage:
                     self.latest_ai_decision = real_ai.analyze_anomaly_with_llm(n.name, n.temp, n.load, self.total_heavy)
             else:
                 if n.load > 75: n.temp += 0.15
-                elif n.temp > 25: n.temp -= 0.2
+                elif n.temp > 25: n.temp -= 0.2  # ক্র্যাশ করা নোড ধীরে ধীরে ঠান্ডা হচ্ছে
 
+            # অটোমেটেড সেলফ-হিলিং লজিক (Self-Healing)
             if n.temp > 95:
                 n.status = "crashed"
                 n.load = 0.0
@@ -73,7 +76,8 @@ class MFSOrchestrator:
             elif n.temp <= 75 and n.status == "warning":
                 n.status = "healthy"
             elif n.temp < 50 and n.status == "crashed":
-                n.status = "healthy"
+                n.status = "healthy"  # ৫০°C-এর নিচে এলে অটোমেটিক আবার Healthy হয়ে যাবে!
+                self.latest_ai_decision = f"[SELF-HEALING]: {n.name} cooled down below 50°C. Re-joining cluster operations!"
 
             if self.ai_enabled and i == 2 and n.status != "crashed":
                 if not self.surge_active and n.load == 0 and self.nodes[0].load < 60 and self.nodes[1].load < 60:
@@ -81,8 +85,6 @@ class MFSOrchestrator:
             elif not self.ai_enabled and i == 2 and n.status == "standby":
                 n.status = "healthy"
 
-            if n.status not in ["standby", "crashed"]:
-                active_count += 1
             current_latency_sum += n.load * 0.4
 
         base_latency = 5.0
@@ -103,6 +105,10 @@ class MFSOrchestrator:
         self.optimized_cost += current_optimized_rate * sim_dt_hours
 
     def route_task(self, is_heavy: bool, load_amt: float):
+        if self.cluster_outage:
+            self.failed_tasks += 1
+            return
+
         dest_idx = 0
         if self.ai_enabled:
             if is_heavy:
@@ -113,14 +119,20 @@ class MFSOrchestrator:
             total = self.total_heavy + self.total_light
             dest_idx = total % 3
 
+        # যদি টার্গেট নোড ক্র্যাশ করে থাকে, তবে অন্য যেকোনো হেলদি নোডে রি-রুট করবে
+        if self.nodes[dest_idx].status == "crashed":
+            healthy_nodes = [idx for idx, n in enumerate(self.nodes) if n.status != "crashed"]
+            if healthy_nodes:
+                dest_idx = healthy_nodes[0]
+            else:
+                self.failed_tasks += 1
+                return
+
         if self.nodes[dest_idx].status == "standby":
             self.nodes[dest_idx].status = "healthy"
         
         self.nodes[dest_idx].assigned += 1
-        if self.nodes[dest_idx].status == "crashed":
-            self.failed_tasks += 1
-        else:
-            self.nodes[dest_idx].load = min(100.0, self.nodes[dest_idx].load + load_amt)
+        self.nodes[dest_idx].load = min(100.0, self.nodes[dest_idx].load + load_amt)
 
     def format_time(self, secs: float) -> str:
         h = int(secs // 3600)
@@ -129,11 +141,11 @@ class MFSOrchestrator:
         return f"{h:02d}:{m:02d}:{s:02d}"
 
     def get_telemetry(self) -> dict:
-        active_nodes_count = sum(1 for n in self.nodes if n.status not in ["standby", "crashed"])
+        active_count = sum(1 for n in self.nodes if n.status not in ["standby", "crashed"])
         return {
             "uptime": round(self.uptime, 2),
             "latency": round(self.latency, 1),
-            "active_nodes": f"{active_nodes_count}/3",
+            "active_nodes": f"{active_count}/3",
             "sim_time": self.format_time(self.sim_seconds),
             "total_heavy": self.total_heavy,
             "total_light": self.total_light,
@@ -142,7 +154,8 @@ class MFSOrchestrator:
             "ai_enabled": self.ai_enabled,
             "surge_active": self.surge_active,
             "anomaly_active": self.anomaly_active,
-            "ai_decision": self.latest_ai_decision  # নতুন লাইভ এআই ডিসিশন পাঠানো হচ্ছে
+            "ai_decision": self.latest_ai_decision,
+            "cluster_outage": self.cluster_outage  # ফ্রন্টএন্ডে ফ্ল্যাগ পাঠানো হচ্ছে
         }
 
 orchestrator = MFSOrchestrator()
